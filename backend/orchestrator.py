@@ -63,11 +63,21 @@ def normalize_indian_speech_text(text: str) -> str:
     return t
 
 
-def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
+def orchestrate_query(query: str, user_id: str = "paytm_user_01", language: str = "auto"):
     steps_log = []
     # Normalize typos and informal Hinglish/Marathi speech
     lower_q = normalize_indian_speech_text(query)
     
+    # 0. User-Selected Target Language Handling
+    req_lang = (language or "auto").strip().lower()
+    target_lang = None
+    if req_lang in ["en", "en-in", "english"]:
+        target_lang = "en"
+    elif req_lang in ["mr", "mr-in", "marathi"]:
+        target_lang = "mr"
+    elif req_lang in ["hi", "hi-in", "hindi"]:
+        target_lang = "hi"
+
     # Smart Preference & Filter Modifiers
     is_cheapest = any(w in lower_q for w in ['cheapest', 'cheap', 'lowest', 'कम दाम', 'सगळ्यात स्वस्त', 'स्वस्त', 'कमी किंमत', 'सस्ता', 'कमी पैशात', 'budget'])
     is_fastest = any(w in lower_q for w in ['fastest', 'fast', 'लवकर', 'जलद', 'जल्दी', 'कम समय', 'पहिला', 'पहिली', 'लवकरात लवकर', 'express'])
@@ -89,13 +99,20 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
     explicit_price = nums[0] if nums else None
 
     # Language detection
-    detected_lang = "hi"
-    if any(w in lower_q for w in ['mala', 'karaycha', 'karayche', 'ahe', 'pahije', 'kiti', 'cha', 'chi', 'kraych', 'dakhva', 'tula']):
+    has_marathi_words = any(w in lower_q for w in ['mala', 'karaycha', 'karayche', 'ahe', 'pahije', 'kiti', 'cha', 'chi', 'kraych', 'dakhva', 'tula', 'माझे', 'मला', 'आहे', 'पाहिजे', 'दाखवा', 'करा', 'काय', 'कसा', 'अडकले', 'कापले', 'तक्रार'])
+    has_hindi_words = any(w in lower_q for w in ['mujhe', 'karna', 'hai', 'chahiye', 'karo', 'bhai', 'paise', 'mera', 'apna', 'dikhao', 'मुझे', 'करना', 'है', 'चाहिए', 'दिखाओ', 'पैसे', 'कट', 'गए', 'गये', 'मदद', 'कैसे'])
+    has_english_words = any(w in lower_q for w in ['please', 'recharge', 'refund', 'check', 'book', 'flight', 'ticket', 'plan', 'help', 'under', 'want', 'daily', 'data', 'best', 'show', 'hotel', 'train', 'bus']) or (bool(re.search(r'^[a-zA-Z0-9\s\.\,\-\_\?]+$', query.strip())) and not has_marathi_words and not has_hindi_words)
+
+    if target_lang:
+        detected_lang = target_lang
+    elif has_marathi_words:
         detected_lang = "mr"
-    elif any(w in lower_q for w in ['mujhe', 'karna', 'hai', 'chahiye', 'karo', 'bhai', 'paise', 'mera', 'apna', 'dikhao']):
-        detected_lang = "hi"
-    elif any(w in lower_q for w in ['please', 'recharge', 'refund', 'check', 'book', 'flight', 'ticket', 'plan']):
+    elif has_english_words and not has_hindi_words and not has_marathi_words:
         detected_lang = "en"
+    elif has_hindi_words:
+        detected_lang = "hi"
+    else:
+        detected_lang = "hi"
 
     # Daily data
     detected_data = ""
@@ -131,21 +148,25 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
         parsed = parse_query_with_groq(query)
     
     if not parsed:
-        is_chat_fallback = any(k in lower_q for k in ['aur kaise', 'kaise ho', 'kya help', 'who are you', 'तू कोण', 'काय मदत', 'कसा आहेस', 'help kar'])
+        is_chat_fallback = any(k in lower_q for k in [
+            'aur kaise', 'kaise ho', 'kya help', 'who are you', 'तू कोण', 'काय मदत', 'कसा आहेस', 'help kar',
+            'what can you', 'what do you', 'what is paytm', 'modes', 'help', 'मदद', 'मदत'
+        ]) or bool(re.search(r'\b(?:hi|hello|hey|help|namaste|नमस्ते|नमस्कार|हैलो|हॅलो)\b', lower_q))
         is_resolve = any(k in lower_q for k in ['pending', 'failed', 'refund', 'complaint', 'तक्रार', 'रिफंड', 'अडकले', 'वापस', 'paise cut', 'cut gaye', 'कट गये', 'कट गए', 'पैसे कट'])
-        is_travel = any(k in lower_q for k in ['flight', 'bus', 'train', 'ticket', 'pune', 'mumbai', 'delhi', 'goa', 'बस', 'ट्रेन', 'फ्लाइट', 'विमान', 'रेल्वे', 'गाडी', 'तिकीट', 'टिकट', 'पुणे', 'मुंबई'])
+        is_travel = any(k in lower_q for k in ['flight', 'flights', 'flite', 'plane', 'bus', 'train', 'ticket', 'tickets', 'pune', 'mumbai', 'delhi', 'goa', 'बस', 'ट्रेन', 'फ्लाइट', 'विमान', 'रेल्वे', 'गाडी', 'तिकीट', 'टिकट']) and not is_resolve and not is_chat_fallback
+        is_recharge_fallback = (any(k in lower_q for k in ['recharge', 'plan', 'pack', 'gb', 'data', 'रिचार्ज', 'रीचार्ज', 'प्लॅन', 'पॅक', 'डेटा', 'जीबी']) or bool(any(op in lower_q for op in ['jio', 'airtel', 'vi', 'bsnl'])) or bool(explicit_price and explicit_price < 2000)) and not is_travel and not is_resolve and not is_chat_fallback
 
         parsed = {
-            "language": detected_lang,
-            "mode": "CHAT" if is_chat_fallback else ("RESOLVE" if is_resolve else "ACTION"),
-            "service": "chat" if is_chat_fallback else ("dispute" if is_resolve else ("travel" if is_travel else "recharge")),
+            "language": target_lang or detected_lang,
+            "mode": "CHAT" if is_chat_fallback else ("RESOLVE" if is_resolve else ("ACTION" if (is_travel or is_recharge_fallback) else "CHAT")),
+            "service": "chat" if is_chat_fallback else ("dispute" if is_resolve else ("travel" if is_travel else ("recharge" if is_recharge_fallback else "chat"))),
             "operator": op_detected,
             "budget": explicit_price or 299,
             "data_daily": detected_data,
             "wants_netflix": wants_netflix,
-            "response_mr": "मी खूप छान आहे! मी तुम्हाला पेटीएमच्या सर्व सेवांमध्ये मदत करू शकतो — जसे की मोबाईल रिचार्ज, बस/ट्रेन/फ्लाइट तिकीट बुकिंग, बिल पेमेंट, किंवा अडकलेले पैसे आणि रिफंडचे त्वरित निराकरण.",
-            "response_hi": "मैं बिल्कुल ठीक हूँ! मैं आपकी पेटीएम की सभी सेवाओं में मदद कर सकता हूँ — जैसे मोबाइल रिचार्ज, बस/ट्रेन/फ्लाइट टिकट बुकिंग, बिजली बिल, या अटके हुए पैसे और रिफंड का समाधान।",
-            "response_en": "I am doing great! I can help you with all Paytm services — mobile recharges, travel tickets, utility bills, or resolving stuck payments and refunds."
+            "response_mr": "नमस्कार! मी पेटीएम वन AI कमांडर आहे. मी तुम्हाला २ प्रमुख मोड्समध्ये मदत करू शकतो:\n\n⚡ **Action Mode**: मोबाईल रिचार्ज, बस/ट्रेन/फ्लाइट तिकीट बुकिंग, वीज बिल आणि शॉपिंग डील्स १-क्लिकमध्ये करा.\n🛡️ **Resolve Mode**: अडकलेले पैसे, अयशस्वी UPI आणि रिफंडचे NPCI नियमांनुसार २४ तासांत जलद निवारण.\n\nतुम्हाला कोणत्या सेवेमध्ये मदत हवी आहे?",
+            "response_hi": "नमस्ते! मैं पेटीएम वन (Paytm ONE) AI कमांडर हूँ। मैं आपकी 2 मुख्य मोड्स में मदद कर सकता हूँ:\n\n⚡ **Action Mode**: मोबाइल रिचार्ज, बस/ट्रेन/फ्लाइट टिकट बुकिंग, बिजली बिल और शॉपिंग डील्स 1-क्लिक में करें।\n🛡️ **Resolve Mode**: अटके हुए पैसे, फेल यूपीआई पेमेंट और रिफंड का 24 घंटे में समाधान।\n\nआप कौन सा मोड देखना चाहते हैं?",
+            "response_en": "Hello! I am Paytm ONE AI Commander. I can assist you across 2 core modes:\n\n⚡ **Action Mode**: Autonomous 1-click execution for Mobile Recharge, Flight & Bus Tickets, Electricity Bills, and Shopping Deals.\n🛡️ **Resolve Mode**: Autonomous 3-Way Reconciliation for stuck payments, failed UPI debits, and refund tracking with 24H SLA.\n\nWhich mode would you like to explore?"
         }
     else:
         # Override with explicit values if found in user's prompt
@@ -344,21 +365,22 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
     is_chat = (
         groq_mode == "CHAT" or groq_service == "chat" or any(k in lower_q for k in [
             'aur kaise', 'kaise ho', 'kya help', 'help kar sakte', 'who are you',
-            'तू कोण आहेस', 'काय मदत करू शकतोस', 'कसा आहेस', 'काय करू शकतोस',
-            'hi', 'hello', 'hey', 'namaste', 'नमस्ते', 'नमस्कार',
-            'how are you', 'what can you do', 'what is paytm', 'tell me about'
-        ])
-    ) and not is_dispute
+            'तू कोण आहेस', 'काय मदत करू शकतोस', 'कसा आहेस', 'काय करू शकतोस', 'काय मदत', 'मदत कर',
+            'what can you do', 'what can you help', 'what do you do', 'how can you help', 'what is paytm',
+            'tell me about', 'how are you', 'what is action mode', 'what is resolve mode', 'modes',
+            'मदत हवी', 'मदत पाहिजे', 'मदद चाहिए', 'क्या मदद', 'क्या कर सकते', 'क्या क्या मदद'
+        ]) or bool(re.search(r'\b(?:hi|hello|hey|help|namaste|नमस्ते|नमस्कार|हैलो|हॅलो)\b', lower_q))
+    ) and not is_dispute and not is_bus and not is_train and not is_flight
 
     # Travel & Tickets: Must have explicit travel vehicle, ticket/travel verb, or two-city route
-    has_travel_verb = bool(re.search(r'\b(?:travel|trip|ticket|tickets|tiket|booking|book|जाना|सफर|प्रवास|तिकीट|टिकट|गाडी|flight|bus|train)\b', lower_q))
+    has_travel_verb = bool(re.search(r'\b(?:travel|trip|ticket|tickets|tiket|booking|book|जाना|सफर|प्रवास|तिकीट|टिकट|गाडी|flight|flights|bus|train)\b', lower_q))
     is_travel = (
         not is_chat and (
             is_bus or is_train or is_flight or has_travel_verb or groq_service == "travel" or (
                 bool(re.search(r'\b(?:to|se|te|ते|से)\b', lower_q)) and any(c.lower() in lower_q for c in city_aliases.keys())
             )
         )
-    ) and not is_shopping and not is_movie and not is_hotel and not is_recharge and not is_merchant and not is_dispute and not is_fastag and not is_dth and not is_electricity and not is_gold
+    ) and not is_shopping and not is_movie and not is_hotel and not is_merchant and not is_dispute and not is_fastag and not is_dth and not is_electricity and not is_gold
 
     if is_chat:
         service = "chat"
@@ -366,6 +388,9 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
     elif is_dispute:
         service = "dispute"
         mode = "RESOLVE"
+    elif is_travel:
+        service = "travel"
+        mode = "ACTION"
     elif is_merchant_summary:
         service = "merchant_summary"
         mode = "ACTION"
@@ -396,16 +421,13 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
     elif is_hotel:
         service = "hotel"
         mode = "ACTION"
-    elif is_travel:
-        service = "travel"
-        mode = "ACTION"
     elif is_recharge or groq_service == "recharge":
         service = "recharge"
         mode = "ACTION"
     elif groq_service in ['recharge', 'expense', 'merchant_summary', 'hotel', 'travel', 'electricity', 'fastag', 'dth', 'merchant', 'gold', 'shopping', 'movie', 'dispute']:
         service = groq_service
         mode = "RESOLVE" if service == "dispute" else "ACTION"
-    elif explicit_price and not is_dispute:
+    elif explicit_price and any(k in lower_q for k in ['recharge', 'plan', 'pack', 'gb', 'data', 'jio', 'airtel', 'vi', 'bsnl', 'रिचार्ज', 'रीचार्ज', 'प्लॅन', 'पॅक']):
         service = "recharge"
         mode = "ACTION"
     else:
@@ -430,11 +452,11 @@ def orchestrate_query(query: str, user_id: str = "paytm_user_01"):
         })
 
         if lang == "mr":
-            ai_msg = (parsed.get("response_mr") if parsed else None) or "मी खूप छान आहे! मी तुम्हाला पेटीएमच्या सर्व सेवांमध्ये मदत करू शकतो — मोबाईल रिचार्ज, बस/ट्रेन/फ्लाइट तिकीट बुकिंग, बिल पेमेंट, किंवा अडकलेले पैसे आणि रिफंडचे त्वरित निराकरण. तुम्हाला काय मदत हवी आहे?"
+            ai_msg = "नमस्कार! मी पेटीएम वन (Paytm ONE) AI कमांडर आहे. मी तुम्हाला २ प्रमुख मोड्समध्ये मदत करू शकतो:\n\n⚡ **Action Mode**: मोबाईल रिचार्ज, बस/ट्रेन/फ्लाइट तिकीट, वीज बिल आणि शॉपिंग डील्स १-क्लिकमध्ये पूर्ण करा.\n🛡️ **Resolve Mode**: अडकलेले पैसे, अयशस्वी UPI पेमेंट आणि रिफंडचे NPCI नियमांनुसार २४ तासांत जलद निवारण.\n\nतुम्हाला कोणत्या मोडमध्ये मदत हवी आहे?"
         elif lang == "hi":
-            ai_msg = (parsed.get("response_hi") if parsed else None) or "मैं बिल्कुल ठीक हूँ! मैं आपकी पेटीएम की सभी सेवाओं में मदद कर सकता हूँ — जैसे मोबाइल रिचार्ज, बस/ट्रेन/फ्लाइट टिकट बुकिंग, बिजली बिल, या अटके हुए पैसे और रिफंड का समाधान। आप क्या करना चाहते हैं?"
+            ai_msg = "नमस्ते! मैं पेटीएम वन (Paytm ONE) AI कमांडर हूँ। मैं आपकी 2 मुख्य मोड्स में मदद कर सकता हूँ:\n\n⚡ **Action Mode**: मोबाइल रिचार्ज, बस/ट्रेन/फ्लाइट टिकट बुकिंग, बिजली बिल और शॉपिंग डील्स 1-क्लिक में करें।\n🛡️ **Resolve Mode**: अटके हुए पैसे, फेल यूपीआई पेमेंट और रिफंड का NPCI 24 घंटे में समाधान।\n\nआप कौन सा मोड देखना चाहते हैं?"
         else:
-            ai_msg = (parsed.get("response_en") if parsed else None) or "I am doing great! I can help you with all Paytm services — mobile recharges, travel tickets (bus, train, flight), utility bills, or resolving stuck payments and refunds. How can I assist you today?"
+            ai_msg = "Hello! I am Paytm ONE AI Commander. I can assist you across 2 core modes:\n\n⚡ **Action Mode**: Autonomous 1-click execution for Mobile Recharge, Flight & Bus Tickets, Electricity Bills, and Shopping Deals.\n🛡️ **Resolve Mode**: Autonomous 3-Way Reconciliation for stuck payments, failed UPI debits, and refund tracking with 24H SLA.\n\nWhich mode would you like to explore?"
 
         steps_log.append({
             "step": 4,

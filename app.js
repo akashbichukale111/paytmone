@@ -755,6 +755,11 @@ class PaytmAgentOrchestrator {
     this.currentMode = mode;
     this.updateModeTabsUi(mode);
     this.renderModeShowcase(mode);
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    const promptInput = document.getElementById('user-chat-prompt');
+    if (promptInput) promptInput.value = '';
   }
 
   updateModeTabsUi(mode) {
@@ -1517,13 +1522,20 @@ class PaytmAgentOrchestrator {
     try {
       const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port === '5500' ? 'http://localhost:8000' : '';
       
+      let reqLang = 'auto';
+      if (typeof paytm !== 'undefined' && paytm.currentLanguage) {
+        if (paytm.currentLanguage.startsWith('en')) reqLang = 'en';
+        else if (paytm.currentLanguage.startsWith('mr')) reqLang = 'mr';
+        else if (paytm.currentLanguage.startsWith('hi')) reqLang = 'hi';
+      }
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s fast timeout
+      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for reliable backend calls
 
       const resp = await fetch(`${apiBase}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query, user_id: 'paytm_user_01' }),
+        body: JSON.stringify({ query: query, user_id: 'paytm_user_01', language: reqLang }),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -1592,8 +1604,35 @@ class PaytmAgentOrchestrator {
     else if (lower.includes('bsnl')) op = 'bsnl';
 
     let lang = 'hi';
-    if (/मला|हवा|हवी|आहे|पाहिजे|करा|काय|किती|कापले|पैसे/.test(lower)) lang = 'mr';
-    else if (/please|book|check|ticket|recharge|flight|refund/.test(lower)) lang = 'en';
+    if (typeof paytm !== 'undefined' && paytm.currentLanguage) {
+      if (paytm.currentLanguage.startsWith('en')) lang = 'en';
+      else if (paytm.currentLanguage.startsWith('mr')) lang = 'mr';
+    } else {
+      if (/मला|हवा|हवी|आहे|पाहिजे|करा|काय|किती|कापले|पैसे/.test(lower)) lang = 'mr';
+      else if (/please|book|check|ticket|recharge|flight|refund|help|what|modes/.test(lower)) lang = 'en';
+    }
+
+    // Check Chat / Help queries first
+    if (/what can you|help|who are you|kaise ho|aur kaise|kya help|madad|मदत|मदद|नमस्ते|नमस्कार|hello|hi|hey|modes/.test(lower)) {
+      const mockChat = {
+        mode: 'CHAT',
+        service: 'chat',
+        language: lang,
+        ai_message: lang === 'en' 
+          ? "Hello! I am Paytm ONE AI Commander. I can assist you across 2 core modes:\n\n⚡ **Action Mode**: Autonomous 1-click execution for Mobile Recharge, Flight & Bus Tickets, Electricity Bills, and Shopping Deals.\n🛡️ **Resolve Mode**: Autonomous 3-Way Reconciliation for stuck payments, failed UPI debits, and refund tracking with 24H SLA.\n\nWhich mode would you like to explore?"
+          : (lang === 'mr' 
+            ? "नमस्कार! मी पेटीएम वन AI कमांडर आहे. मी तुम्हाला २ प्रमुख मोड्समध्ये मदत करू शकतो:\n\n⚡ **Action Mode**: मोबाईल रिचार्ज, बस/ट्रेन/फ्लाइट तिकीट, वीज बिल आणि शॉपिंग डील्स १-क्लिकमध्ये.\n🛡️ **Resolve Mode**: अडकलेले पैसे, अयशस्वी UPI पेमेंट आणि रिफंडचे २४ तासांत जलद निवारण.\n\nतुम्हाला काय करायचे आहे?"
+            : "नमस्ते! मैं पेटीएम वन (Paytm ONE) AI कमांडर हूँ। मैं आपकी 2 मुख्य मोड्स में मदद कर सकता हूँ:\n\n⚡ **Action Mode**: मोबाइल रिचार्ज, बस/ट्रेन/फ्लाइट टिकट बुकिंग, बिजली बिल और डील्स 1-क्लिक में करें।\n🛡️ **Resolve Mode**: अटके हुए पैसे, फेल यूपीआई पेमेंट और रिफंड का 24 घंटे में समाधान।\n\nआप कौन सा मोड देखना चाहते हैं?"),
+        suggested_replies: lang === 'en'
+          ? ["Recharge Jio ₹299 ⚡", "Pune to Mumbai Flight ✈️", "Dispute Stuck Payment 🛡️", "Pay Electricity Bill 💡"]
+          : (lang === 'mr'
+            ? ["Jio ₹299 रिचार्ज करा ⚡", "पुणे ते मुंबई फ्लाईट ✈️", "अडकलेले पैसे रिफंड करा 🛡️", "वीज बिल भरा 💡"]
+            : ["Jio ₹299 रिचार्ज करें ⚡", "पुणे से मुंबई फ्लाइट ✈️", "अटके पैसे की शिकायत 🛡️", "बिजली बिल भरें 💡"])
+      };
+      this.renderChatMode(mockChat);
+      paytm.playSarvamAudio(null, mockChat.ai_message, lang === 'en' ? 'en-IN' : (lang === 'mr' ? 'mr-IN' : 'hi-IN'));
+      return;
+    }
 
     // Route service
     if (/कापले|cut|refund|pending|failed|तक्रार|रिफंड|मिळाले नाही|अडकले/.test(lower)) {

@@ -580,6 +580,9 @@
       }
       if (window.agentEngine) {
         window.agentEngine.initWorkspace(initialMode, initialQuery);
+        if (initialQuery && window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
       }
     });
 
@@ -639,18 +642,40 @@
 
     function changeLang(langCode) {
       paytm.currentLanguage = langCode;
+      const simpleLang = langCode.startsWith('en') ? 'en' : (langCode.startsWith('mr') ? 'mr' : 'hi');
+      if (window.agentEngine) {
+        window.agentEngine.activeLanguage = simpleLang;
+      }
       ['hi', 'en', 'mr'].forEach(l => {
         const btn = document.getElementById(`lang-${l}`);
-        if (langCode.includes(l)) {
-          btn.classList.add('bg-[#002970]', 'text-white', 'shadow-xs');
-          btn.classList.remove('text-slate-600');
-        } else {
-          btn.classList.remove('bg-[#002970]', 'text-white', 'shadow-xs');
-          btn.classList.add('text-slate-600');
+        if (btn) {
+          if (langCode.includes(l)) {
+            btn.classList.add('bg-[#002970]', 'text-white', 'shadow-xs');
+            btn.classList.remove('text-slate-600');
+          } else {
+            btn.classList.remove('bg-[#002970]', 'text-white', 'shadow-xs');
+            btn.classList.add('text-slate-600');
+          }
         }
       });
+
+      const input = document.getElementById('user-chat-prompt');
+      if (input) {
+        if (simpleLang === 'en') {
+          input.placeholder = 'Speak or type... (e.g. Jio 299 recharge, Pune to Mumbai flights, dispute failed payment...)';
+        } else if (simpleLang === 'mr') {
+          input.placeholder = 'बोला किंवा टाईप करा... (उदा. Jio 299 रिचार्ज, पुणे ते मुंबई बस, पैसे कट झाले...)';
+        } else {
+          input.placeholder = 'बोलिए या टाइप करें... (उदा. Jio 300 का 2GB daily data, Airtel 349, या पैसे कट गए...)';
+        }
+      }
+
       paytm.playSound('click');
-      sendNewQuery();
+      paytm.showToast(simpleLang === 'en' ? 'Language switched to English' : (simpleLang === 'mr' ? 'भाषा मराठी निवडली' : 'भाषा हिंदी चुनी गई'), 'info', '🌐');
+      
+      if (input && input.value.trim()) {
+        sendNewQuery();
+      }
     }
 
     function submitPinManually() {

@@ -61,7 +61,7 @@ def handle_chat_query(req: QueryRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     
-    result = orchestrate_query(req.query, req.user_id)
+    result = orchestrate_query(req.query, req.user_id, language=req.language or "auto")
     return result
 
 
